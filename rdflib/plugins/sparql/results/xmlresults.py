@@ -60,8 +60,8 @@ class XMLResult(Result):
             g = Graph()
             try:
                 g.parse(data=xmlstring)
-                if len(g) == 0:
-                    raise
+                #if len(g) == 0:
+                #    raise
                 type_ = 'CONSTRUCT'
 
             except:

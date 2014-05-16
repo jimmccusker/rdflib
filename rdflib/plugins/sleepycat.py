@@ -45,6 +45,7 @@ class Sleepycat(Store):
     transaction_aware = False
     graph_aware = True
     db_env = None
+    batch_unification = False
 
     def __init__(self, configuration=None, identifier=None):
         if not has_bsddb:

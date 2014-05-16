@@ -24,7 +24,7 @@ LIMIT = 'LIMIT'
 OFFSET = 'OFFSET'
 ORDERBY = 'ORDER BY'
 
-import re
+import re, collections
 # import warnings
 try:
     from SPARQLWrapper import SPARQLWrapper, XML
@@ -55,6 +55,7 @@ from rdflib import Variable, Namespace, BNode, URIRef, Literal
 
 import httplib
 import urlparse
+import urllib2
 
 class NSSPARQLWrapper(SPARQLWrapper):
     nsBindings = {}
@@ -481,8 +482,11 @@ class SPARQLUpdateStore(SPARQLStore):
                              queryEndpoint, bNodeAsURI, sparql11, context_aware)
 
         self.connection = None
+        self._edits = None
 
         self.update_endpoint = update_endpoint
+        self.transaction_aware = True
+
 
         self.postAsEncoded = postAsEncoded
         self.headers = {'Content-type': SPARQL_POST_ENCODED,
@@ -490,6 +494,22 @@ class SPARQLUpdateStore(SPARQLStore):
 
         if not self.postAsEncoded:
             self.headers['Content-type'] = SPARQL_POST_UPDATE
+
+    def query(self,*args, **kwargs):
+        self.commit()
+        return SPARQLStore.query(self,*args, **kwargs)
+
+    def triples(self,*args, **kwargs):
+        self.commit()
+        return SPARQLStore.triples(self,*args, **kwargs)
+
+    def contexts(self,*args, **kwargs):
+        self.commit()
+        return SPARQLStore.contexts(self,*args, **kwargs)
+
+    def __len__(self,*args, **kwargs):
+        self.commit()
+        return SPARQLStore.__len__(self,*args, **kwargs)
 
     def __set_update_endpoint(self, update_endpoint):
         self.__update_endpoint = update_endpoint
@@ -543,14 +563,31 @@ class SPARQLUpdateStore(SPARQLStore):
         if not self.update_endpoint:
             self.update_endpoint = self.endpoint
 
+    def _transaction(self):
+        if self._edits == None:
+            self._edits = []
+        return self._edits
+
     # Transactional interfaces
     def commit(self):
-        """ """
-        raise TypeError('The SPARQL Update store is not transaction aware!')
+        """ add(), addN(), and remove() are transactional to reduce overhead of many small edits. 
+        Read and update() calls will automatically commit any outstanding edits. This is potentially
+         """
+        if self._edits and len(self._edits) > 0:
+            try:
+                r = self._do_update(';'.join(self._edits))
+                content = r.read()  # we expect no content
+                if r.getcode() not in (200, 204):
+                    raise Exception("Could not update: %d\n%s" % (
+                                    r.getcode(), content))
+            except urllib2.URLError as e:
+                raise Exception("Could not update: %d\n%s" % (
+                                r.getcode(), content))
+            self._edits = None
 
     def rollback(self):
         """ """
-        raise TypeError('The SPARQL Update store is not transaction aware')
+        self._edits = None
 
     def add(self, spo, context=None, quoted=False):
         """ Add a triple to the store of triples. """
@@ -574,36 +611,29 @@ class SPARQLUpdateStore(SPARQLStore):
                 context.identifier.n3(), triple)
         else:
             q = "INSERT DATA { %s }" % triple
-        r = self._do_update(q)
-        content = r.read()  # we expect no content
-        if r.status not in (200, 204):
-            raise Exception("Could not update: %d %s\n%s" % (
-                r.status, r.reason, content))
+        self._transaction().append(q)
 
     def addN(self, quads):
         """ Add a list of quads to the store. """
         if not self.connection:
             raise Exception("UpdateEndpoint is not set - call 'open'")
 
-        data = ""
+        contexts = collections.defaultdict(list)
         for spoc in quads:
             (subject, predicate, obj, context) = spoc
+            # if ( isinstance(subject, BNode) or
+            #      isinstance(predicate, BNode) or
+            #      isinstance(obj, BNode) ):
+            #     raise Exception("SPARQLStore does not support Bnodes! "
+            #                     "See http://www.w3.org/TR/sparql11-query/#BGPsparqlBNodes")
+            contexts[context].append((subject,predicate,obj))
 
-            if ( isinstance(subject, BNode) or
-                 isinstance(predicate, BNode) or
-                 isinstance(obj, BNode) ):
-                raise Exception("SPARQLStore does not support Bnodes! "
-                                "See http://www.w3.org/TR/sparql11-query/#BGPsparqlBNodes")
-
-
-            triple = "%s %s %s ." % (subject.n3(), predicate.n3(), obj.n3())
-            data += "INSERT DATA { GRAPH <%s> { %s } }\n" % (
-                context.identifier, triple)
-        r = self._do_update(data)
-        content = r.read()  # we expect no content
-        if r.status not in (200, 204):
-            raise Exception("Could not update: %d %s\n%s" % (
-                r.status, r.reason, content))
+        data = []
+        for context in contexts:
+            triples = ["%s %s %s ." % (x[0].n3(), x[1].n3(), x[2].n3()) for x in contexts[context]]
+            data.append("INSERT DATA { GRAPH <%s> { %s } }\n" % (
+                context.identifier, '\n'.join(triples)))
+        self._transaction().extend(data)
 
     def remove(self, spo, context):
         """ Remove a triple from the store """
@@ -625,19 +655,17 @@ class SPARQLUpdateStore(SPARQLStore):
                 context.identifier.n3(), triple)
         else:
             q = "DELETE { %s } WHERE { %s } " % (triple, triple)
-        r = self._do_update(q)
-        content = r.read()  # we expect no content
-        if r.status not in (200, 204):
-            raise Exception("Could not update: %d %s\n%s" % (
-                r.status, r.reason, content))
+        self._transaction().append(q)
 
     def _do_update(self, update):
         import urllib
         if self.postAsEncoded:
             update = urllib.urlencode({'update': update.encode("utf-8")})
-        self.connection.request(
-            'POST', self.path, update.encode("utf-8"), self.headers)
-        return self.connection.getresponse()
+        request = urllib2.Request(self.update_endpoint,update.encode("utf-8"),self.headers)
+        return urllib2.urlopen(request)
+        #self.connection.request(
+        #    'POST', self.path, update.encode("utf-8"), self.headers)
+        #return self.connection.getresponse()
 
     def update(self, query,
                initNs={},
@@ -674,8 +702,4 @@ class SPARQLUpdateStore(SPARQLStore):
 
             query = self.where_pattern.sub("WHERE { " + values, query)
 
-        r = self._do_update(query)
-        content = r.read()  # we expect no content
-        if r.status not in (200, 204):
-            raise Exception("Could not update: %d %s\n%s" % (
-                r.status, r.reason, content))
+        self._transaction().append(query)
