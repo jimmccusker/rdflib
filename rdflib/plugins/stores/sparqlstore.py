@@ -188,9 +188,12 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     transaction_aware = False
     regex_matching = NATIVE_REGEX
 
+    where_pattern = re.compile(r"""(?P<where>WHERE\s*{)""", re.IGNORECASE)
+
     def __init__(self,
                  endpoint=None, bNodeAsURI=False,
-                 sparql11=True, context_aware=True):
+                 sparql11=True, context_aware=True,
+                 use_let_syntax=False):
         """
         """
         if endpoint:
@@ -199,6 +202,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
         self.nsBindings = {}
         self.sparql11 = sparql11
         self.context_aware = context_aware
+        self.use_let_syntax = use_let_syntax
 
     # Database Management Methods
     def create(self, configuration):
@@ -270,11 +274,17 @@ class SPARQLStore(NSSPARQLWrapper, Store):
                     "initBindings not supported for SPARQL 1.0 Endpoints.")
             v = list(initBindings)
 
-            # VALUES was added to SPARQL 1.1 on 2012/07/24
-            query += "\nVALUES ( %s )\n{ ( %s ) }\n"\
-                % (" ".join("?" + str(x) for x in v),
-                   " ".join(initBindings[x].n3() for x in v))
+            if self.use_let_syntax:
+                values = '\n'.join(["\nLET ( ?%s := ( %s ) )"\
+                    % (str(x), initBindings[x].n3() ) for x in v])
+            else:
+                # VALUES was added to SPARQL 1.1 on 2012/07/24
+                values = "\nVALUES ( %s )\n{ ( %s ) }\n"\
+                    % (" ".join("?" + str(x) for x in v),
+                       " ".join(initBindings[x].n3() for x in v))
+            query = self.where_pattern.sub("WHERE { " + values, query)
 
+        print query
         self.resetQuery()
         if self.context_aware and queryGraph and queryGraph != '__UNION__':
             self.addDefaultGraph(queryGraph)
@@ -470,16 +480,15 @@ class SPARQLUpdateStore(SPARQLStore):
 
     """
 
-    where_pattern = re.compile(r"""(?P<where>WHERE\s*{)""", re.IGNORECASE)
-
     def __init__(self,
                  queryEndpoint=None, update_endpoint=None,
                  bNodeAsURI=False, sparql11=True,
                  context_aware=True,
-                 postAsEncoded=True):
+                 postAsEncoded=True,
+                 use_let_syntax=False):
 
         SPARQLStore.__init__(self,
-                             queryEndpoint, bNodeAsURI, sparql11, context_aware)
+                             queryEndpoint, bNodeAsURI, sparql11, context_aware, use_let_syntax)
 
         self.connection = None
         self._edits = None
@@ -696,9 +705,14 @@ class SPARQLUpdateStore(SPARQLStore):
             # have a WHERE clause.  This also works for updates with
             # more than one INSERT/DELETE.
             v = list(initBindings)
-            values = "\nVALUES ( %s )\n{ ( %s ) }\n"\
-                % (" ".join("?" + str(x) for x in v),
-                   " ".join(initBindings[x].n3() for x in v))
+            if self.use_let_syntax:
+
+                values += '\n'.join(["\nLET ( ?%s := ( %s ) )"\
+                    % (str(x), initBindings[x].n3() ) for x in v])
+            else:
+                values = "\nVALUES ( %s )\n{ ( %s ) }\n"\
+                    % (" ".join("?" + str(x) for x in v),
+                       " ".join(initBindings[x].n3() for x in v))
 
             query = self.where_pattern.sub("WHERE { " + values, query)
 
