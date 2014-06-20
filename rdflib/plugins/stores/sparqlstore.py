@@ -284,7 +284,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
                        " ".join(initBindings[x].n3() for x in v))
             query = self.where_pattern.sub("WHERE { " + values, query)
 
-        print query
+        #print query
         self.resetQuery()
         if self.context_aware and queryGraph and queryGraph != '__UNION__':
             self.addDefaultGraph(queryGraph)
