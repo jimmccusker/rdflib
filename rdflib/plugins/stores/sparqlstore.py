@@ -583,16 +583,16 @@ class SPARQLUpdateStore(SPARQLStore):
         Read and update() calls will automatically commit any outstanding edits. This is potentially
          """
         if self._edits and len(self._edits) > 0:
-            try:
+            #try:
                 r = self._do_update(';'.join(self._edits))
                 content = r.read()  # we expect no content
                 if r.getcode() not in (200, 204):
                     raise Exception("Could not update: %d\n%s" % (
                                     r.getcode(), content))
-            except urllib2.URLError as e:
-                raise Exception("Could not update: %d\n%s" % (
-                                r.getcode(), content))
-            self._edits = None
+            #except urllib2.URLError as e:
+                #raise Exception("Could not update: %d\n%s" % (
+                #                r.getcode(), content))
+                self._edits = None
 
     def rollback(self):
         """ """
