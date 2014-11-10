@@ -2,22 +2,9 @@
 #
 """
 This is an RDFLib store around Ivan Herman et al.'s SPARQL service wrapper.
-This was first done in layer-cake, and then ported to RDFLib 3 and rdfextras
-
-This version works with vanilla SPARQLWrapper installed by ``easy_install``,
-``pip`` or similar. If you installed ``rdflib`` with a tool that understands
-dependencies, it should have been installed automatically for you.
-
-Changes:
-    - Layercake adding support for namespace binding, I removed it again to
-      work with vanilla SPARQLWrapper
-    - JSON object mapping support suppressed
-    - Replaced '4Suite-XML Domlette with Elementtree
-    - Incorporated as an RDFLib store
+This was first done in layer-cake, and then ported to RDFLib
 
 """
-SPARQL_POST_UPDATE = "application/sparql-update"
-SPARQL_POST_ENCODED = "application/x-www-form-urlencoded; charset=UTF-8"
 
 # Defines some SPARQL keywords
 LIMIT = 'LIMIT'
@@ -27,7 +14,7 @@ ORDERBY = 'ORDER BY'
 import re, collections
 # import warnings
 try:
-    from SPARQLWrapper import SPARQLWrapper, XML
+    from SPARQLWrapper import SPARQLWrapper, XML, POST, GET, URLENCODED, POSTDIRECTLY
 except ImportError:
     raise Exception(
         "SPARQLWrapper not found! SPARQL Store will not work." +
@@ -52,6 +39,7 @@ from rdflib.plugins.stores.regexmatching import NATIVE_REGEX
 from rdflib.store import Store
 from rdflib.query import Result
 from rdflib import Variable, Namespace, BNode, URIRef, Literal
+from rdflib.graph import DATASET_DEFAULT_GRAPH_ID
 
 import httplib
 import urlparse
@@ -161,23 +149,20 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     """
     An RDFLib store around a SPARQL endpoint
 
-    This is in theory context-aware, and should work OK
-    when the context is specified. (I.e. for Graph objects)
-    then all queries should work against the named graph with the
-    identifier of the graph only.
+    This is in theory context-aware and should work as expected
+    when a context is specified.
 
-    For ConjunctiveGraphs, reading is done from the "default graph"
-    Exactly what this means depends on your endpoint.
-    General SPARQL does not offer a simple way to query the
-    union of all graphs.
+    For ConjunctiveGraphs, reading is done from the "default graph" Exactly
+    what this means depends on your endpoint, because SPARQL does not offer a
+    simple way to query the union of all graphs as it would be expected for a
+    ConjuntiveGraph.
 
     Fuseki/TDB has a flag for specifying that the default graph
-    is the union of all graphs (tdb:unionDefaultGraph in the Fuseki config)
-    If this is set this will work fine.
+    is the union of all graphs (tdb:unionDefaultGraph in the Fuseki config).
 
     .. warning:: The SPARQL Store does not support blank-nodes!
 
-                 As blank-nodes acts as variables in SPARQL queries
+                 As blank-nodes act as variables in SPARQL queries
                  there is no way to query for a particular blank node.
 
                  See http://www.w3.org/TR/sparql11-query/#BGPsparqlBNodes
@@ -186,6 +171,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     """
     formula_aware = False
     transaction_aware = False
+    graph_aware = True
     regex_matching = NATIVE_REGEX
 
     where_pattern = re.compile(r"""(?P<where>WHERE\s*{)""", re.IGNORECASE)
@@ -193,16 +179,18 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     def __init__(self,
                  endpoint=None, bNodeAsURI=False,
                  sparql11=True, context_aware=True,
-                 use_let_syntax=False):
+                 use_let_syntax=False,
+                 **sparqlwrapper_kwargs):
         """
         """
-        if endpoint:
-            super(SPARQLStore, self).__init__(endpoint, returnFormat=XML)
+        super(SPARQLStore, self).__init__(endpoint, returnFormat=XML, **sparqlwrapper_kwargs)
+        self.setUseKeepAlive()
         self.bNodeAsURI = bNodeAsURI
         self.nsBindings = {}
         self.sparql11 = sparql11
         self.context_aware = context_aware
         self.use_let_syntax = use_let_syntax
+        self.graph_aware = context_aware
 
     # Database Management Methods
     def create(self, configuration):
@@ -228,36 +216,22 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     query_endpoint = property(__get_query_endpoint, __set_query_endpoint)
 
     def destroy(self, configuration):
-        """
-        FIXME: Add documentation
-        """
         raise TypeError('The SPARQL store is read only')
 
     # Transactional interfaces
     def commit(self):
-        """ """
         raise TypeError('The SPARQL store is read only')
 
     def rollback(self):
-        """ """
         raise TypeError('The SPARQL store is read only')
 
     def add(self, (subject, predicate, obj), context=None, quoted=False):
-        """ Add a triple to the store of triples. """
         raise TypeError('The SPARQL store is read only')
 
     def addN(self, quads):
-        """
-        Adds each item in the list of statements to a specific context.
-        The quoted argument is interpreted by formula-aware stores to
-        indicate this statement is quoted/hypothetical.
-
-        Note that the default implementation is a redirect to add.
-        """
         raise TypeError('The SPARQL store is read only')
 
     def remove(self, (subject, predicate, obj), context):
-        """ Remove a triple from the store """
         raise TypeError('The SPARQL store is read only')
 
     def query(self, query,
@@ -286,7 +260,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
 
         #print query
         self.resetQuery()
-        if self.context_aware and queryGraph and queryGraph != '__UNION__':
+        if self._is_contextual(queryGraph):
             self.addDefaultGraph(queryGraph)
         self.setQuery(query)
 
@@ -379,7 +353,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
             pass
 
         self.resetQuery()
-        if self.context_aware and context is not None:
+        if self._is_contextual(context):
             self.addDefaultGraph(context.identifier)
         self.setQuery(query)
 
@@ -408,7 +382,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
         else:
             self.resetQuery()
             q = "SELECT (count(*) as ?c) WHERE {?s ?p ?o .}"
-            if self.context_aware and context is not None:
+            if self._is_contextual(context):
                 self.addDefaultGraph(context.identifier)
             self.setQuery(q)
             doc = ElementTree.parse(SPARQLWrapper.query(self).response)
@@ -418,24 +392,29 @@ class SPARQLStore(NSSPARQLWrapper, Store):
 
     def contexts(self, triple=None):
         """
-        Iterates over results to SELECT ?NAME { GRAPH ?NAME { ?s ?p ?o } }
-        returning instances of this store with the SPARQL wrapper
-        object updated via addNamedGraph(?NAME)
+        Iterates over results to "SELECT ?NAME { GRAPH ?NAME { ?s ?p ?o } }"
+        or "SELECT ?NAME { GRAPH ?NAME {} }" if triple is `None`.
+
+        Returns instances of this store with the SPARQL wrapper
+        object updated via addNamedGraph(?NAME).
+
         This causes a named-graph-uri key / value  pair to be sent over
-        the protocol
+        the protocol.
+
+        Please note that some SPARQL endpoints are not able to find empty named
+        graphs.
         """
+        self.resetQuery()
 
         if triple:
             s, p, o = triple
+            params = ((s if s else Variable('s')).n3(),
+                      (p if p else Variable('p')).n3(),
+                      (o if o else Variable('o')).n3())
+            self.setQuery('SELECT ?name WHERE { GRAPH ?name { %s %s %s }}' % params)
         else:
-            s = p = o = None
+            self.setQuery('SELECT ?name WHERE { GRAPH ?name {} }')
 
-        params = ((s if s else Variable('s')).n3(),
-                  (p if p else Variable('p')).n3(),
-                  (o if o else Variable('o')).n3())
-
-        self.setQuery(
-            'SELECT ?name WHERE { GRAPH ?name { %s %s %s }}' % params)
         doc = ElementTree.parse(SPARQLWrapper.query(self).response)
 
         return (rt.get(Variable("name"))
@@ -457,6 +436,23 @@ class SPARQLStore(NSSPARQLWrapper, Store):
     def namespaces(self):
         for prefix, ns in self.nsBindings.items():
             yield prefix, ns
+
+    def add_graph(self, graph):
+        raise TypeError('The SPARQL store is read only')
+
+    def remove_graph(self, graph):
+        raise TypeError('The SPARQL store is read only')
+
+    def _is_contextual(self, graph):
+        """ Returns `True` if the "GRAPH" keyword must appear
+        in the final SPARQL query sent to the endpoint.
+        """
+        if (not self.context_aware) or (graph is None):
+            return False
+        if isinstance(graph, basestring):
+            return graph != '__UNION__'
+        else:
+            return graph.identifier != DATASET_DEFAULT_GRAPH_ID
 
 
 class SPARQLUpdateStore(SPARQLStore):
@@ -480,6 +476,54 @@ class SPARQLUpdateStore(SPARQLStore):
 
     """
 
+    where_pattern = re.compile(r"""(?P<where>WHERE\s*{)""", re.IGNORECASE)
+
+    ##################################################################
+    ### Regex for injecting GRAPH blocks into updates on a context ###
+    ##################################################################
+
+    # Observations on the SPARQL grammar (http://www.w3.org/TR/2013/REC-sparql11-query-20130321/):
+    # 1. Only the terminals STRING_LITERAL1, STRING_LITERAL2,
+    #    STRING_LITERAL_LONG1, STRING_LITERAL_LONG2, and comments can contain
+    #    curly braces.
+    # 2. The non-terminals introduce curly braces in pairs only.
+    # 3. Unescaped " can occur only in strings and comments.
+    # 3. Unescaped ' can occur only in strings, comments, and IRIRefs.
+    # 4. \ always escapes the following character, especially \", \', and
+    #    \\ denote literal ", ', and \ respectively.
+    # 5. # always starts a comment outside of string and IRI
+    # 6. A comment ends at the next newline
+    # 7. IRIREFs need to be detected, as they may contain # without starting a comment
+    # 8. PrefixedNames do not contain a #
+    # As a consequence, it should be rather easy to detect strings and comments
+    # in order to avoid unbalanced curly braces.
+
+    # From the SPARQL grammar
+    STRING_LITERAL1 = ur"'([^'\\]|\\.)*'"
+    STRING_LITERAL2 = ur'"([^"\\]|\\.)*"'
+    STRING_LITERAL_LONG1 = ur"'''(('|'')?([^'\\]|\\.))*'''"
+    STRING_LITERAL_LONG2 = ur'"""(("|"")?([^"\\]|\\.))*"""'
+    String = u'(%s)|(%s)|(%s)|(%s)' % (STRING_LITERAL1, STRING_LITERAL2, STRING_LITERAL_LONG1, STRING_LITERAL_LONG2)
+    IRIREF = ur'<([^<>"{}|^`\]\\\[\x00-\x20])*>'
+    COMMENT = ur'#[^\x0D\x0A]*([\x0D\x0A]|\Z)'
+
+    # Simplified grammar to find { at beginning and } at end of blocks
+    BLOCK_START = u'{'
+    BLOCK_END = u'}'
+    ESCAPED = ur'\\.'
+
+    # Match anything that doesn't start or end a block:
+    BlockContent = u'(%s)|(%s)|(%s)|(%s)' % (String, IRIREF, COMMENT, ESCAPED)
+    BlockFinding = u'(?P<block_start>%s)|(?P<block_end>%s)|(?P<block_content>%s)' % (BLOCK_START, BLOCK_END, BlockContent)
+    BLOCK_FINDING_PATTERN = re.compile(BlockFinding)
+
+    # Note that BLOCK_FINDING_PATTERN.finditer() will not cover the whole
+    # string with matches. Everything that is not matched will have to be
+    # part of the modified query as is.
+
+    ##################################################################
+
+
     def __init__(self,
                  queryEndpoint=None, update_endpoint=None,
                  bNodeAsURI=False, sparql11=True,
@@ -488,7 +532,7 @@ class SPARQLUpdateStore(SPARQLStore):
                  use_let_syntax=False):
 
         SPARQLStore.__init__(self,
-                             queryEndpoint, bNodeAsURI, sparql11, context_aware, use_let_syntax)
+                             queryEndpoint, bNodeAsURI, sparql11, context_aware, use_let_syntax=False, updateEndpoint=update_endpoint)
 
         self.connection = None
         self._edits = None
@@ -563,14 +607,26 @@ class SPARQLUpdateStore(SPARQLStore):
             raise Exception("Cannot create a SPARQL Endpoint")
 
         if isinstance(configuration, tuple):
-            self.query_endpoint = configuration[0]
+            self.endpoint = configuration[0]
             if len(configuration) > 1:
-                self.update_endpoint = configuration[1]
+                self.updateEndpoint = configuration[1]
         else:
             self.endpoint = configuration
 
-        if not self.update_endpoint:
-            self.update_endpoint = self.endpoint
+        if not self.updateEndpoint:
+            self.updateEndpoint = self.endpoint
+
+    def __set_update_endpoint(self, update_endpoint):
+        self.updateEndpoint = update_endpoint
+
+    def __get_update_endpoint(self):
+        return self.updateEndpoint
+
+    update_endpoint = property(
+        __get_update_endpoint,
+        __set_update_endpoint,
+        doc='the HTTP URL for the Update endpoint, typically' +
+            'something like http://server/dataset/update')
 
     def _transaction(self):
         if self._edits == None:
@@ -598,10 +654,13 @@ class SPARQLUpdateStore(SPARQLStore):
         """ """
         self._edits = None
 
+    def rollback(self):
+        raise TypeError('The SPARQL Update store is not transaction aware')
+
     def add(self, spo, context=None, quoted=False):
         """ Add a triple to the store of triples. """
 
-        if not self.connection:
+        if not self.endpoint:
             raise Exception("UpdateEndpoint is not set - call 'open'")
 
         assert not quoted
@@ -615,7 +674,7 @@ class SPARQLUpdateStore(SPARQLStore):
 
 
         triple = "%s %s %s ." % (subject.n3(), predicate.n3(), obj.n3())
-        if self.context_aware and context is not None:
+        if self._is_contextual(context):
             q = "INSERT DATA { GRAPH %s { %s } }" % (
                 context.identifier.n3(), triple)
         else:
@@ -624,7 +683,7 @@ class SPARQLUpdateStore(SPARQLStore):
 
     def addN(self, quads):
         """ Add a list of quads to the store. """
-        if not self.connection:
+        if not self.endpoint:
             raise Exception("UpdateEndpoint is not set - call 'open'")
 
         contexts = collections.defaultdict(list)
@@ -646,7 +705,7 @@ class SPARQLUpdateStore(SPARQLStore):
 
     def remove(self, spo, context):
         """ Remove a triple from the store """
-        if not self.connection:
+        if not self.endpoint:
             raise Exception("UpdateEndpoint is not set - call 'open'")
 
         (subject, predicate, obj) = spo
@@ -658,7 +717,7 @@ class SPARQLUpdateStore(SPARQLStore):
             obj = Variable("O")
 
         triple = "%s %s %s ." % (subject.n3(), predicate.n3(), obj.n3())
-        if self.context_aware and context is not None:
+        if self._is_contextual(context):
             q = "DELETE { GRAPH %s { %s } } WHERE { GRAPH %s { %s } }" % (
                 context.identifier.n3(), triple,
                 context.identifier.n3(), triple)
@@ -672,9 +731,6 @@ class SPARQLUpdateStore(SPARQLStore):
             update = urllib.urlencode({'update': update.encode("utf-8")})
         request = urllib2.Request(self.update_endpoint,update.encode("utf-8"),self.headers)
         return urllib2.urlopen(request)
-        #self.connection.request(
-        #    'POST', self.path, update.encode("utf-8"), self.headers)
-        #return self.connection.getresponse()
 
     def update(self, query,
                initNs={},
@@ -692,11 +748,37 @@ class SPARQLUpdateStore(SPARQLStore):
         Important: initBindings fails if the update contains the
         substring 'WHERE {' which does not denote a WHERE clause, e.g.
         if it is part of a literal.
+
+        .. admonition:: Context-aware query rewriting
+
+            - **When:**  If context-awareness is enabled and the graph is not the default graph of the store.
+            - **Why:** To ensure consistency with the :class:`~rdflib.plugins.memory.IOMemory` store.
+              The graph must except "local" SPARQL requests (requests with no GRAPH keyword)
+              like if it was the default graph.
+            - **What is done:** These "local" queries are rewritten by this store.
+              The content of each block of a SPARQL Update operation is wrapped in a GRAPH block
+              except if the block is empty.
+              This basically causes INSERT, INSERT DATA, DELETE, DELETE DATA and WHERE to operate
+              only on the context.
+            - **Example:** `"INSERT DATA { <urn:michel> <urn:likes> <urn:pizza> }"` is converted into
+              `"INSERT DATA { GRAPH <urn:graph> { <urn:michel> <urn:likes> <urn:pizza> } }"`.
+            - **Warning:** Queries are presumed to be "local" but this assumption is **not checked**.
+              For instance, if the query already contains GRAPH blocks, the latter will be wrapped in new GRAPH blocks.
+            - **Warning:** A simplified grammar is used that should tolerate
+              extensions of the SPARQL grammar. Still, the process may fail in
+              uncommon situations and produce invalid output.
+
         """
+        if not self.endpoint:
+            raise Exception("UpdateEndpoint is not set - call 'open'")
+
         self.debug = DEBUG
         assert isinstance(query, basestring)
         self.setNamespaceBindings(initNs)
         query = self.injectPrefixes(query)
+
+        if self._is_contextual(queryGraph):
+            query = self._insert_named_graph(query, queryGraph)
 
         if initBindings:
             # For INSERT and DELETE the WHERE clause is obligatory
@@ -717,3 +799,68 @@ class SPARQLUpdateStore(SPARQLStore):
             query = self.where_pattern.sub("WHERE { " + values, query)
 
         self._transaction().append(query)
+
+    def _insert_named_graph(self, query, query_graph):
+        """
+            Inserts GRAPH <query_graph> {} into blocks of SPARQL Update operations
+
+            For instance,  "INSERT DATA { <urn:michel> <urn:likes> <urn:pizza> }"
+            is converted into
+            "INSERT DATA { GRAPH <urn:graph> { <urn:michel> <urn:likes> <urn:pizza> } }"
+        """
+        graph_block_open = " GRAPH <%s> {" % query_graph
+        graph_block_close = "} "
+
+        # SPARQL Update supports the following operations:
+        # LOAD, CLEAR, DROP, ADD, MOVE, COPY, CREATE, INSERT DATA, DELETE DATA, DELETE/INSERT, DELETE WHERE
+        # LOAD, CLEAR, DROP, ADD, MOVE, COPY, CREATE do not make much sense in a context.
+        # INSERT DATA, DELETE DATA, and DELETE WHERE require the contents of their block to be wrapped in a GRAPH <?> { }.
+        # DELETE/INSERT supports the WITH keyword, which sets the graph to be
+        # used for all following DELETE/INSERT instruction including the
+        # non-optional WHERE block. Equivalently, a GRAPH block can be added to
+        # all blocks.
+        #
+        # Strategy employed here: Wrap the contents of every top-level block into a `GRAPH <?> { }`.
+
+        level = 0
+        modified_query = []
+        pos = 0
+        for match in self.BLOCK_FINDING_PATTERN.finditer(query):
+            if match.group('block_start') is not None:
+                level += 1
+                if level == 1:
+                    modified_query.append(query[pos:match.end()])
+                    modified_query.append(graph_block_open)
+                    pos = match.end()
+            elif match.group('block_end') is not None:
+                if level == 1:
+                    since_previous_pos = query[pos:match.start()]
+                    if modified_query[-1] is graph_block_open and (since_previous_pos == "" or since_previous_pos.isspace()):
+                        # In this case, adding graph_block_start and
+                        # graph_block_end results in an empty GRAPH block. Some
+                        # enpoints (e.g. TDB) can not handle this. Therefore
+                        # remove the previously added block_start.
+                        modified_query.pop()
+                        modified_query.append(since_previous_pos)
+                    else:
+                        modified_query.append(since_previous_pos)
+                        modified_query.append(graph_block_close)
+                    pos = match.start()
+                level -= 1
+        modified_query.append(query[pos:])
+
+        return "".join(modified_query)
+
+    def add_graph(self, graph):
+        if not self.graph_aware:
+            Store.add_graph(self, graph)
+        elif graph.identifier != DATASET_DEFAULT_GRAPH_ID:
+            self.update("CREATE GRAPH <%s>" % graph.identifier)
+
+    def remove_graph(self, graph):
+        if not self.graph_aware:
+            Store.remove_graph(self, graph)
+        elif graph.identifier == DATASET_DEFAULT_GRAPH_ID:
+            self.update("DROP DEFAULT")
+        else:
+            self.update("DROP GRAPH <%s>" % graph.identifier)
