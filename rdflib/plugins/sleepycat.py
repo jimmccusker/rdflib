@@ -34,7 +34,7 @@ if has_bsddb:
     DBOPENFLAGS = db.DB_THREAD
 
 import logging
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 __all__ = ['Sleepycat']
 
@@ -202,13 +202,13 @@ class Sleepycat(Store):
                         if time() - t1 > min_seconds \
                                 or time() - t0 > max_seconds:
                             self.__needs_sync = False
-                            _logger.debug("sync")
+                            logger.debug("sync")
                             self.sync()
                             break
                 else:
                     sleep(1)
         except Exception, e:
-            _logger.exception(e)
+            logger.exception(e)
 
     def sync(self):
         if self.__open:
@@ -497,10 +497,10 @@ class Sleepycat(Store):
                     current = None
                 cursor.close()
 
-    def add_graph(self, graph): 
+    def add_graph(self, graph):
         self.__contexts.put(bb(self._to_string(graph)), "")
 
-    def remove_graph(self, graph): 
+    def remove_graph(self, graph):
         self.remove((None, None, None), graph)
 
     def _from_string(self, i):

@@ -2,14 +2,23 @@
 import unittest
 import re
 
-from rdflib import ConjunctiveGraph, URIRef
+from rdflib import ConjunctiveGraph, URIRef, Literal
 from rdflib.util import from_n3
 
-# this assumed SPARQL1.1 query/update endpoints
-# running locally at http://localhost:3030/ukpp/
-# for instance fuseki started with ./fuseki-server --mem --update /ukpp
+HOST = 'http://localhost:3031'
+DB = '/db/'
 
-# THIS WILL DELETE ALL DATA IN THE /data dataset
+# this assumes SPARQL1.1 query/update endpoints running locally at
+# http://localhost:3031/db/
+#
+# The ConjunctiveGraph tests below require that the SPARQL endpoint renders its
+# default graph as the union of all known graphs! This is incompatible with the
+# endpoint behavior required by our Dataset tests in test_dataset.py, so you
+# need to run a second SPARQL endpoint on a non standard port,
+# e.g. fuseki started with:
+# ./fuseki-server --port 3031 --memTDB --update --set tdb:unionDefaultGraph=true /db
+
+# THIS WILL DELETE ALL DATA IN THE /db dataset
 
 michel = URIRef(u'urn:michel')
 tarek = URIRef(u'urn:tarek')
@@ -29,7 +38,7 @@ class TestSparql11(unittest.TestCase):
         self.longMessage = True
         self.graph = ConjunctiveGraph('SPARQLUpdateStore')
 
-        root = "http://localhost:3030/ukpp/"
+        root = HOST + DB
         self.graph.open((root + "sparql", root + "update"))
 
         # clean out the store
@@ -82,8 +91,20 @@ class TestSparql11(unittest.TestCase):
         g.add((tarek, hates, cheese))
 
         self.assertEquals(2, len(g), 'graph contains 2 triples')
+
+        # the following are actually bad tests as they depend on your endpoint,
+        # as pointed out in the sparqlstore.py code:
+        #
+        ## For ConjunctiveGraphs, reading is done from the "default graph" Exactly
+        ## what this means depends on your endpoint, because SPARQL does not offer a
+        ## simple way to query the union of all graphs as it would be expected for a
+        ## ConjuntiveGraph.
+        ##
+        ## Fuseki/TDB has a flag for specifying that the default graph
+        ## is the union of all graphs (tdb:unionDefaultGraph in the Fuseki config).
         self.assertEquals(3, len(self.graph),
-                          'default union graph contains three triples')
+            'default union graph should contain three triples but contains:\n'
+            '%s' % list(self.graph))
 
         r = self.graph.query("SELECT * WHERE { ?s <urn:likes> <urn:pizza> . }")
         self.assertEquals(2, len(list(r)), "two people like pizza")
@@ -105,23 +126,23 @@ class TestSparql11(unittest.TestCase):
 
     def testUpdate(self):
         self.graph.update("INSERT DATA { GRAPH <urn:graph> { <urn:michel> <urn:likes> <urn:pizza> . } }")
-        
+
         g = self.graph.get_context(graphuri)
         self.assertEquals(1, len(g), 'graph contains 1 triples')
-        
+
     def testUpdateWithInitNs(self):
         self.graph.update(
             "INSERT DATA { GRAPH ns:graph { ns:michel ns:likes ns:pizza . } }",
             initNs={'ns': URIRef('urn:')}
         )
-        
+
         g = self.graph.get_context(graphuri)
         self.assertEquals(
             set(g.triples((None,None,None))),
             set([(michel,likes,pizza)]),
             'only michel likes pizza'
         )
-        
+
     def testUpdateWithInitBindings(self):
         self.graph.update(
             "INSERT { GRAPH <urn:graph> { ?a ?b ?c . } } WherE { }",
@@ -131,7 +152,7 @@ class TestSparql11(unittest.TestCase):
                 'c': URIRef('urn:pizza'),
             }
         )
-        
+
         g = self.graph.get_context(graphuri)
         self.assertEquals(
             set(g.triples((None,None,None))),
@@ -150,7 +171,7 @@ class TestSparql11(unittest.TestCase):
                 'd': URIRef('urn:bob'),
             }
         )
-        
+
         g = self.graph.get_context(graphuri)
         self.assertEquals(
             set(g.triples((None,None,None))),
@@ -269,12 +290,24 @@ class TestSparql11(unittest.TestCase):
             self.assertTrue(empty_graph_iri in [unicode(g.identifier)
                                                 for g in self.graph.contexts()])
 
+    def testEmptyLiteral(self):
+        # test for https://github.com/RDFLib/rdflib/issues/457
+        # also see test_issue457.py which is sparql store independent!
+        g = self.graph.get_context(graphuri)
+        g.add((
+            URIRef('http://example.com/s'),
+            URIRef('http://example.com/p'),
+            Literal('')))
+
+        o = tuple(g)[0][2]
+        self.assertEquals(o, Literal(''), repr(o))
+
 from nose import SkipTest
 import urllib2
 try:
-    assert len(urllib2.urlopen("http://localhost:3030/").read()) > 0
+    assert len(urllib2.urlopen(HOST).read()) > 0
 except:
-    raise SkipTest("http://localhost:3030/ is unavailable.")
+    raise SkipTest(HOST + " is unavailable.")
 
 
 if __name__ == '__main__':

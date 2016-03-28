@@ -230,7 +230,7 @@ Using Namespace class:
 """)
 
 import logging
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 # import md5
 import random
@@ -611,9 +611,13 @@ class Graph(Node):
         Remove any existing triples for subject and predicate before adding
         (subject, predicate, object).
         """
-        (subject, predicate, object) = triple
+        (subject, predicate, object_) = triple
+        assert subject is not None, \
+            "s can't be None in .set([s,p,o]), as it would remove (*, p, *)"
+        assert predicate is not None, \
+            "p can't be None in .set([s,p,o]), as it would remove (s, *, *)"
         self.remove((subject, predicate, None))
-        self.add((subject, predicate, object))
+        self.add((subject, predicate, object_))
 
     def subjects(self, predicate=None, object=None):
         """A generator of subjects with the given predicate and object"""
@@ -1011,8 +1015,8 @@ class Graph(Node):
         2
 
         >>> g = Graph()
-        >>> result = g.parse(file=open(file_name, "r"),
-        ...     format="application/rdf+xml")
+        >>> with open(file_name, "r") as f:
+        ...     result = g.parse(f, format="application/rdf+xml")
         >>> len(g)
         2
 
@@ -1030,7 +1034,11 @@ class Graph(Node):
             # "expicitly specify one with the format argument." % source)
             format = "application/rdf+xml"
         parser = plugin.get(format, Parser)()
-        parser.parse(source, self, **args)
+        try:
+            parser.parse(source, self, **args)
+        finally:
+            if source.auto_close:
+                source.close()
         return self
 
     def load(self, source, publicID=None, format="xml"):
@@ -1076,10 +1084,12 @@ class Graph(Node):
             query_object, initBindings, initNs, **kwargs))
 
     def update(self, update_object, processor='sparql',
-              initNs={}, initBindings={},
+              initNs=None, initBindings=None,
               use_store_provided=True, **kwargs):
-        """
-        """
+        """Update this graph with the given update query."""
+        initBindings = initBindings or {}
+        initNs = initNs or dict(self.namespaces())
+
         if hasattr(self.store, "update") and use_store_provided:
             try:
                 return self.store.update(
@@ -1163,9 +1173,9 @@ class Graph(Node):
             return False
 
     def all_nodes(self):
-        obj = set(self.objects())
-        allNodes = obj.union(set(self.subjects()))
-        return allNodes
+        res = set(self.objects())
+        res.update(self.subjects())
+        return res
 
     def resource(self, identifier):
         """Create a new ``Resource`` instance.
@@ -1249,7 +1259,7 @@ class Graph(Node):
 class ConjunctiveGraph(Graph):
 
     """
-    A ConjunctiveGraph is an (unamed) aggregation of all the named
+    A ConjunctiveGraph is an (unnamed) aggregation of all the named
     graphs in a store.
 
     It has a ``default`` graph, whose name is associated with the
@@ -1350,7 +1360,7 @@ class ConjunctiveGraph(Graph):
 
         For legacy reasons, this can take the context to query either
         as a fourth element of the quad, or as the explicit context
-        keyword paramater. The kw param takes precedence.
+        keyword parameter. The kw param takes precedence.
         """
 
         s,p,o,c = self._spoc(triple_or_quad)
@@ -1456,8 +1466,7 @@ class ConjunctiveGraph(Graph):
 
         context = Graph(store=self.store, identifier=g_id)
         context.remove((None, None, None)) # hmm ?
-        context.parse(source, publicID=publicID, format=format,
-                      location=location, file=file, data=data, **args)
+        context.parse(source, publicID=publicID, format=format, **args)
         return context
 
     def __reduce__(self):
@@ -1621,9 +1630,12 @@ class Dataset(ConjunctiveGraph):
     def contexts(self, triple=None):
         default = False
         for c in super(Dataset, self).contexts(triple):
-            default|=c.identifier == DATASET_DEFAULT_GRAPH_ID
+            default |= c.identifier == DATASET_DEFAULT_GRAPH_ID
             yield c
-        if not default: yield self.graph(DATASET_DEFAULT_GRAPH_ID)
+        if not default:
+            yield self.graph(DATASET_DEFAULT_GRAPH_ID)
+
+    graphs = contexts
 
     def quads(self, quad):
         for s, p, o, c in super(Dataset, self).quads(quad):
@@ -1631,7 +1643,6 @@ class Dataset(ConjunctiveGraph):
                 yield (s, p, o, None)
             else:
                 yield (s, p, o, c.identifier)
-
 
 class QuotedGraph(Graph):
     """

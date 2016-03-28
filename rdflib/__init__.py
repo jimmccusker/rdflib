@@ -1,5 +1,4 @@
-"""\
-A pure Python package providing the core RDF constructs.
+"""A pure Python package providing the core RDF constructs.
 
 The packages is intended to provide the core RDF types and interfaces
 for working with RDF. The package defines a plugin interface for
@@ -12,26 +11,42 @@ The primary interface `rdflib` exposes to work with RDF is
 
 A tiny example:
 
-    >>> import rdflib
+    >>> from rdflib import Graph, URIRef, Literal
 
-    >>> g = rdflib.Graph()
+    >>> g = Graph()
     >>> result = g.parse("http://www.w3.org/2000/10/swap/test/meet/blue.rdf")
 
     >>> print("graph has %s statements." % len(g))
-    graph has 9 statements.
+    graph has 4 statements.
     >>>
     >>> for s, p, o in g:
     ...     if (s, p, o) not in g:
     ...         raise Exception("It better be!")
 
-    >>> s = g.serialize(format='n3')
+    >>> s = g.serialize(format='nt')
+    >>>
+    >>> sorted(g) == [
+    ...  (URIRef(u'http://meetings.example.com/cal#m1'),
+    ...   URIRef(u'http://www.example.org/meeting_organization#homePage'),
+    ...   URIRef(u'http://meetings.example.com/m1/hp')),
+    ...  (URIRef(u'http://www.example.org/people#fred'),
+    ...   URIRef(u'http://www.example.org/meeting_organization#attending'),
+    ...   URIRef(u'http://meetings.example.com/cal#m1')),
+    ...  (URIRef(u'http://www.example.org/people#fred'),
+    ...   URIRef(u'http://www.example.org/personal_details#GivenName'),
+    ...   Literal(u'Fred')),
+    ...  (URIRef(u'http://www.example.org/people#fred'),
+    ...   URIRef(u'http://www.example.org/personal_details#hasEmail'),
+    ...   URIRef(u'mailto:fred@example.com'))
+    ... ]
+    True
 
 """
 __docformat__ = "restructuredtext en"
 
 # The format of the __version__ line is matched by a regex in setup.py
-__version__ = "4.2-dev"
-__date__ = "2013/12/31"
+__version__ = "4.2.2-dev"
+__date__ = "2015/08/12"
 
 __all__ = [
     'URIRef',
@@ -58,8 +73,27 @@ assert sys.version_info >= (2, 5, 0), "rdflib requires Python 2.5 or higher"
 del sys
 
 import logging
-_LOGGER = logging.getLogger("rdflib")
-_LOGGER.info("RDFLib Version: %s" % __version__)
+import __main__
+if not hasattr(__main__, '__file__'):
+    # show log messages in interactive mode
+    logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+logger.info("RDFLib Version: %s" % __version__)
+
+
+try:
+    unichr(0x10FFFF)
+except ValueError:
+    import warnings
+    warnings.warn(
+        'You are using a narrow Python build!\n'
+        'This means that your Python does not properly support chars > 16bit.\n'
+        'On your system chars like c=u"\\U0010FFFF" will have a len(c)==2.\n'
+        'As this can cause hard to debug problems with string processing\n'
+        '(slicing, regexp, ...) later on, we strongly advise to use a wide\n'
+        'Python build in production systems.',
+        ImportWarning)
+    del warnings
 
 
 NORMALIZE_LITERALS = True

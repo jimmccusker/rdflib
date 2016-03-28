@@ -14,7 +14,7 @@ def setup_python3():
     # Not covered by "setup.py clean --all", so explicit deletion required.
     if exists(tmp_src):
         dir_util.remove_tree(tmp_src)
-    log.set_verbosity(1)
+    # log.set_verbosity(1)
     fl = FileList()
     for line in open("MANIFEST.in"):
         if not line.strip():
@@ -36,10 +36,10 @@ def setup_python3():
 
 kwargs = {}
 if sys.version_info[0] >= 3:
-    from setuptools import setup
-    kwargs['use_2to3'] = True
+    from setuptools import setup, find_packages
+    # kwargs['use_2to3'] = True  # is done in setup_python3 above already
     kwargs['install_requires'] = ['isodate', 'pyparsing']
-    kwargs['tests_require'] = ['html5lib']
+    kwargs['tests_require'] = ['html5lib', 'networkx']
     kwargs['requires'] = [
         'isodate', 'pyparsing',
         'SPARQLWrapper']
@@ -47,12 +47,13 @@ if sys.version_info[0] >= 3:
     assert setup
 else:
     try:
-        from setuptools import setup
+        from setuptools import setup, find_packages
         assert setup
         kwargs['test_suite'] = "nose.collector"
         kwargs['install_requires'] = [
             'isodate',
             'pyparsing', 'SPARQLWrapper']
+        kwargs['tests_require'] = ['networkx']
 
         if sys.version_info[1]<7:  # Python 2.6
             kwargs['install_requires'].append('ordereddict')
@@ -64,7 +65,7 @@ else:
             kwargs['install_requires'].append('html5lib')
 
     except ImportError:
-        from distutils.core import setup
+        from distutils.core import setup, find_packages
 
 
 
@@ -80,22 +81,7 @@ def find_version(filename):
 
 version = find_version('rdflib/__init__.py')
 
-packages = ['rdflib',
-            'rdflib/extras',
-            'rdflib/plugins',
-            'rdflib/plugins/parsers',
-            'rdflib/plugins/parsers/pyRdfa',
-            'rdflib/plugins/parsers/pyRdfa/transform',
-            'rdflib/plugins/parsers/pyRdfa/extras',
-            'rdflib/plugins/parsers/pyRdfa/host',
-            'rdflib/plugins/parsers/pyRdfa/rdfs',
-            'rdflib/plugins/parsers/pyMicrodata',
-            'rdflib/plugins/serializers',
-            'rdflib/plugins/sparql',
-            'rdflib/plugins/sparql/results',
-            'rdflib/plugins/stores',
-            'rdflib/tools'
-              ]
+packages = find_packages(exclude=('examples*', 'test*'))
 
 if os.environ.get('READTHEDOCS', None):
     # if building docs for RTD
@@ -118,11 +104,11 @@ setup(
             "Programming Language :: Python",
             "Programming Language :: Python :: 2",
             "Programming Language :: Python :: 3",
-            "Programming Language :: Python :: 2.5",
             "Programming Language :: Python :: 2.6",
             "Programming Language :: Python :: 2.7",
-            "Programming Language :: Python :: 3.2",
             "Programming Language :: Python :: 3.3",
+            "Programming Language :: Python :: 3.4",
+            "Programming Language :: Python :: 3.5",
             "License :: OSI Approved :: BSD License",
             "Topic :: Software Development :: Libraries :: Python Modules",
             "Operating System :: OS Independent",

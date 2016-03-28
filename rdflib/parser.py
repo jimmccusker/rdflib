@@ -49,6 +49,12 @@ class InputSource(xmlreader.InputSource, object):
     def __init__(self, system_id=None):
         xmlreader.InputSource.__init__(self, system_id=system_id)
         self.content_type = None
+        self.auto_close = False  # see Graph.parse(), true if opened by us
+
+    def close(self):
+        f = self.getByteStream()
+        if f and hasattr(f, 'close'):
+            f.close()
 
 
 class StringInputSource(InputSource):
@@ -102,9 +108,11 @@ class URLInputSource(InputSource):
         self.url = file.geturl()    # in case redirections took place
         self.setPublicId(self.url)
         self.content_type = file.info().get('content-type')
-        self.content_type = self.content_type.split(";", 1)[0]
+        if self.content_type is not None:
+            self.content_type = self.content_type.split(";", 1)[0]
         self.setByteStream(file)
         # TODO: self.setEncoding(encoding)
+        self.response_info = file.info() # a mimetools.Message instance
 
     def __repr__(self):
         return self.url
@@ -131,8 +139,16 @@ def create_input_source(source=None, publicID=None,
     parameters.
     """
 
-    # TODO: test that exactly one of source, location, file, and data
-    # is not None.
+    # test that exactly one of source, location, file, and data is not None.
+    if sum((
+        source is not None,
+        location is not None,
+        file is not None,
+        data is not None,
+    )) != 1:
+        raise ValueError(
+            'exactly one of source, location, file or data must be given'
+        )
 
     input_source = None
 
@@ -156,6 +172,7 @@ def create_input_source(source=None, publicID=None,
 
     absolute_location = None  # Further to fix for issue 130
 
+    auto_close = False  # make sure we close all file handles we open
     if location is not None:
         # Fix for Windows problem https://github.com/RDFLib/rdflib/issues/145
         if os.path.exists(location):
@@ -167,6 +184,7 @@ def create_input_source(source=None, publicID=None,
             file = open(filename, "rb")
         else:
             input_source = URLInputSource(absolute_location, format)
+        auto_close = True
         # publicID = publicID or absolute_location  # Further to fix
                                                     # for issue 130
 
@@ -177,10 +195,12 @@ def create_input_source(source=None, publicID=None,
         if isinstance(data, unicode):
             data = data.encode('utf-8')
         input_source = StringInputSource(data)
+        auto_close = True
 
     if input_source is None:
         raise Exception("could not create InputSource")
     else:
+        input_source.auto_close |= auto_close
         if publicID is not None:  # Further to fix for issue 130
             input_source.setPublicId(publicID)
         # Further to fix for issue 130

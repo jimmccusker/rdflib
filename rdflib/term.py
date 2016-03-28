@@ -36,9 +36,8 @@ __all__ = [
 ]
 
 import logging
+logger = logging.getLogger(__name__)
 import warnings
-
-_LOGGER = logging.getLogger(__name__)
 
 import base64
 import xml.dom.minidom
@@ -184,7 +183,9 @@ class Identifier(Node, unicode):  # allow Identifiers to be Nodes in the Graph
         return self == other
 
     def __hash__(self):
-        return hash(type(self)) ^ hash(unicode(self))
+        t = type(self)
+        fqn = t.__module__ + '.' + t.__name__
+        return hash(fqn) ^ hash(unicode(self))
 
 
 class URIRef(Identifier):
@@ -203,7 +204,7 @@ class URIRef(Identifier):
                     value += "#"
 
         if not _is_valid_uri(value):
-            _LOGGER.warning('%s does not look like a valid URI, trying to serialize this will break.'%value)
+            logger.warning('%s does not look like a valid URI, trying to serialize this will break.'%value)
 
 
         try:
@@ -931,8 +932,12 @@ class Literal(Identifier):
         -- 6.5.1 Literal Equality (RDF: Concepts and Abstract Syntax)
 
         """
-
-        return unicode.__hash__(self) ^ hash(self.language.lower() if self.language else None) ^ hash(self.datatype)
+        res = super(Literal, self).__hash__()
+        if self.language:
+            res ^= hash(self.language.lower())
+        if self.datatype:
+            res ^= hash(self.datatype)
+        return res
 
     @py3compat.format_doctest_out
     def __eq__(self, other):
@@ -1503,7 +1508,7 @@ def bind(datatype, pythontype, constructor=None, lexicalizer=None):
 
     """
     if datatype in _toPythonMapping:
-        _LOGGER.warning("datatype '%s' was already bound. Rebinding." %
+        logger.warning("datatype '%s' was already bound. Rebinding." %
                         datatype)
 
     if constructor == None:
@@ -1528,7 +1533,12 @@ class Variable(Identifier):
         return unicode.__new__(cls, value)
 
     def __repr__(self):
-        return self.n3()
+        if self.__class__ is Variable:
+            clsName = "rdflib.term.Variable"
+        else:
+            clsName = self.__class__.__name__
+
+        return """%s(%s)""" % (clsName, super(Variable, self).__repr__())
 
     def toPython(self):
         return "?%s" % self

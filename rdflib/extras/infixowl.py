@@ -130,13 +130,7 @@ from rdflib.term import Identifier
 from rdflib.util import first
 
 import logging
-
-
-def _debug(*args, **kw):
-    # import logging
-    logging.basicConfig(level=logging.ERROR, format="%(message)s")
-    logger = logging.getLogger(__name__)
-    logger.debug(*args, **kw)
+logger = logging.getLogger(__name__)
 
 
 """
@@ -352,7 +346,7 @@ def manchesterSyntax(thing, store, boolean=None, transientList=False):
             if isinstance(thing, BNode):
                 return thing.n3()
             return u"<" + thing + ">"
-            _debug(list(store.objects(subject=thing, predicate=RDF.type)))
+            logger.debug(list(store.objects(subject=thing, predicate=RDF.type)))
             raise
             return '[]'  # +thing._id.encode('utf-8')+'</em>'
         label = first(Class(thing, graph=store).label)
@@ -727,7 +721,7 @@ CLASS_RELATIONS = set(
 def ComponentTerms(cls):
     """
     Takes a Class instance and returns a generator over the classes that
-    are involved in its definition, ignoring unamed classes
+    are involved in its definition, ignoring unnamed classes
     """
     if OWL_NS.Restriction in cls.type:
         try:

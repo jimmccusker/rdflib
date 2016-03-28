@@ -7,6 +7,7 @@ from rdflib.term import BNode
 from rdflib.term import Literal
 from rdflib.term import URIRef
 from rdflib import util
+from rdflib import XSD
 from rdflib.exceptions import SubjectTypeError
 from rdflib.exceptions import PredicateTypeError
 from rdflib.exceptions import ObjectTypeError
@@ -193,13 +194,13 @@ class TestUtilTermConvert(unittest.TestCase):
         res = util.from_n3(s, default=None, backend=None)
         self.assert_(isinstance(res, Literal))
         self.assertEqual(res, Literal('michel',
-                                      datatype=URIRef('xsd:fr')))
-    
+                                      datatype=XSD['fr']))
+
     def test_util_from_n3_expectliteralanddtype(self):
         s = '"true"^^xsd:boolean'
         res = util.from_n3(s, default=None, backend=None)
-        self.assertTrue(res.eq(Literal('true', datatype='xsd:boolean')))
-    
+        self.assertTrue(res.eq(Literal('true', datatype=XSD['boolean'])))
+
     def test_util_from_n3_expectliteralwithdatatypefromint(self):
         s = '42'
         res = util.from_n3(s)
@@ -222,6 +223,12 @@ class TestUtilTermConvert(unittest.TestCase):
         s = '"\\""'
         res = util.from_n3(s, default=None, backend=None)
         self.assert_(res, Literal('\\"', lang='en'))
+
+    def test_util_from_n3_expectliteralwithtrailingbackslash(self):
+        s = '"trailing\\\\"^^<http://www.w3.org/2001/XMLSchema#string>'
+        res = util.from_n3(s)
+        self.assert_(res, Literal('trailing\\', datatype=XSD['string']))
+        self.assert_(res.n3(), s)
     
     def test_util_from_n3_expectpartialidempotencewithn3(self):
         for n3 in ('<http://ex.com/foo>',
@@ -263,12 +270,12 @@ class TestUtilTermConvert(unittest.TestCase):
 
 
     def test_util_from_n3_expectquotedgraph(self):
-        s = '{http://example.com/schema}'
+        s = '{<http://example.com/schema>}'
         res = util.from_n3(s, default=None, backend="IOMemory")
         self.assert_(isinstance(res, QuotedGraph))
 
     def test_util_from_n3_expectgraph(self):
-        s = '[http://example.com/schema]'
+        s = '[<http://example.com/schema>]'
         res = util.from_n3(s, default=None, backend="IOMemory")
         self.assert_(isinstance(res, Graph))
 

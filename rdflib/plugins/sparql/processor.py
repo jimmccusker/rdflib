@@ -22,7 +22,9 @@ def prepareQuery(queryString, initNs={}, base=None):
     """
     Parse and translate a SPARQL Query
     """
-    return translateQuery(parseQuery(queryString), base, initNs)
+    ret = translateQuery(parseQuery(queryString), base, initNs)
+    ret._original_args = (queryString, initNs, base)
+    return ret
 
 
 def processUpdate(graph, updateString, initBindings={}, initNs={}, base=None):
@@ -48,7 +50,7 @@ class SPARQLUpdateProcessor(UpdateProcessor):
         self.graph = graph
 
     def update(self, strOrQuery, initBindings={}, initNs={}):
-        if isinstance(strOrQuery, basestring): 
+        if isinstance(strOrQuery, basestring):
             strOrQuery=translateUpdate(parseUpdate(strOrQuery), initNs=initNs)
 
         return evalUpdate(self.graph, strOrQuery, initBindings)
