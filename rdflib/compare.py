@@ -241,6 +241,8 @@ class Color:
             self.nodes[:], self.hashfunc, self.color,
             hash_cache=self._hash_cache)
 
+    def __str__(self):
+        return self.hash_color() + " ("+str(len(self.nodes))+")"
 
 class _TripleCanonicalizer(object):
 
@@ -301,7 +303,7 @@ class _TripleCanonicalizer(object):
 
     def _get_candidates(self, coloring):
         candidates = [c for c in coloring if not c.discrete()]
-        for c in [c for c in coloring if not c.discrete()]:
+        for c in candidates[:1]:
             for node in c.nodes:
                 yield node, c
 
@@ -359,6 +361,8 @@ class _TripleCanonicalizer(object):
     def _traces(self, coloring, stats=None, depth=[0]):
         if stats is not None and 'prunings' not in stats:
             stats['prunings'] = 0
+        if 'debug' in stats:
+            print ''.join([' ' for x in range(depth[0])]), depth, [len(c.nodes) for c in coloring if len(c.nodes) > 1]
         depth[0] += 1
         candidates = self._get_candidates(coloring)
         best = []
@@ -385,7 +389,17 @@ class _TripleCanonicalizer(object):
             new_color = self._individuate(color_copy, candidate)
             coloring_copy.append(new_color)
             refined_coloring = self._refine(coloring_copy, [new_color])
+            c_set = set([c.hash_color() for c in coloring_copy])
+            rc_set = set([c.hash_color() for c in refined_coloring])
             color_score = tuple([c.key() for c in refined_coloring])
+            if c_set.issubset(rc_set):
+                # This is a "safe" individuation, so prune all the siblings.
+                best = [refined_coloring]
+                best_score = color_score
+                if stats is not None:
+                    stats['prunings'] += 1
+                break
+            
             experimental = self._experimental_path(coloring_copy)
             experimental_score = set([c.key() for c in experimental])
             if last_coloring:
@@ -402,13 +416,17 @@ class _TripleCanonicalizer(object):
                 # prune this branch.
                 if stats is not None:
                     stats['prunings'] += 1
-            elif experimental_score != best_experimental_score:
+            elif experimental_score > best_experimental_score:
                 best.append(refined_coloring)
             else:
                 # prune this branch.
                 if stats is not None:
                     stats['prunings'] += 1
         discrete = [x for x in best if self._discrete(x)]
+        if 'debug' in stats:
+            print ''.join([' ' for x in range(depth[0])]), len(discrete), len(best), depth, len(coloring)
+        if len(discrete) == 1:
+            return discrete[0]
         if len(discrete) == 0:
             best_score = None
             best_depth = None
@@ -421,6 +439,7 @@ class _TripleCanonicalizer(object):
                     best_score = color_score
                     best_depth = d[0]
             depth[0] = best_depth
+        
         return discrete[0]
 
     def canonical_triples(self, stats=None):
