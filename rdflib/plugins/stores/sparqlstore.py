@@ -125,11 +125,11 @@ def CastToTerm(node):
 
 
 def _node_to_sparql(node):
-    if isinstance(node, BNode):
-        raise Exception(
-            "SPARQLStore does not support BNodes! "
-            "See http://www.w3.org/TR/sparql11-query/#BGPsparqlBNodes"
-        )
+    #if isinstance(node, BNode):
+    #    raise Exception(
+    #        "SPARQLStore does not support BNodes! "
+    #        "See http://www.w3.org/TR/sparql11-query/#BGPsparqlBNodes"
+    #    )
     return node.n3()
 
 
@@ -242,6 +242,7 @@ class SPARQLStore(NSSPARQLWrapper, Store):
                  sparql11=True, context_aware=True,
                  node_to_sparql=_node_to_sparql,
                  node_from_result=_node_from_result,
+                 use_let_syntax=False,
                  **sparqlwrapper_kwargs):
         """
         """
@@ -706,10 +707,10 @@ class SPARQLUpdateStore(SPARQLStore):
         nts = self.node_to_sparql
         triple = "%s %s %s ." % (nts(subject), nts(predicate), nts(obj))
         if self._is_contextual(context):
-            q = "INSERT DATA { GRAPH %s { %s } }" % (
+            q = "INSERT { GRAPH %s { %s } }" % (
                 nts(context.identifier), triple)
         else:
-            q = "INSERT DATA { %s }" % triple
+            q = "INSERT { %s }" % triple
         self._transaction().append(q)
         if self.autocommit:
             self.commit()
