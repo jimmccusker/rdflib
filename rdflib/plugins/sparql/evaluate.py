@@ -206,12 +206,8 @@ def evalMultiset(ctx, part):
 
 def evalPart(ctx, part):
 
-    # try custom evaluation functions
-    for name, c in CUSTOM_EVALS.items():
-        try:
-            return c(ctx, part)
-        except NotImplementedError:
-            pass  # the given custome-function did not handle this part
+    if part.name in CUSTOM_EVALS:
+        return CUSTOM_EVALS[part.name](ctx, part)
 
     if part.name == 'BGP':
         # Reorder triples patterns by number of bound nodes in the current ctx
