@@ -1226,9 +1226,9 @@ class SinkParser:
 
                     if self._baseURI:
                         uref = join(self._baseURI, uref)  # was: uripath.join
-                    else:
-                        assert ":" in uref, \
-                            "With no base URI, cannot deal with relative URIs"
+                    #else:
+                    #    assert ":" in uref, \
+                    #        "With no base URI, cannot deal with relative URIs"
                     if argstr[i - 1:i] == "#" and not uref[-1:] == "#":
                         uref = uref + \
                             "#"  # She meant it! Weirdness in urlparse?
@@ -1872,7 +1872,7 @@ class TurtleParser(Parser):
     def __init__(self):
         pass
 
-    def parse(self, source, graph, encoding="utf-8", turtle=True):
+    def parse(self, source, graph, encoding="utf-8", turtle=True, baseURI=None):
 
         if encoding not in [None, "utf-8"]:
             raise Exception(
@@ -1881,8 +1881,9 @@ class TurtleParser(Parser):
 
         sink = RDFSink(graph)
 
-        baseURI = graph.absolutize(
-            source.getPublicId() or source.getSystemId() or "")
+        if baseURI is None:
+            baseURI = graph.absolutize(
+                source.getPublicId() or source.getSystemId() or "")
         p = SinkParser(sink, baseURI=baseURI, turtle=turtle)
 
         p.loadStream(source.getByteStream())
